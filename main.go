@@ -100,7 +100,7 @@ func uniqueName(base string) string {
 	}
 }
 
-// styles assign a color per user.
+// Styles assign a color per user.
 
 var sysStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 
@@ -270,16 +270,61 @@ func splitSpam(s string) []string {
 	return out
 }
 
+// 1) Put this helper anywhere in main.go (e.g., above runCmd):
+// splitArgs splits a command line into args, respecting "quotes".
+func splitArgs(line string) []string {
+	var args []string
+	var cur strings.Builder
+	inQuotes := false
+	escape := false
+
+	for _, r := range line {
+		switch {
+		case inQuotes && escape:
+			if r == '"' {
+				cur.WriteRune('"')
+			} else {
+				cur.WriteRune('\\')
+				cur.WriteRune(r)
+			}
+			escape = false
+
+		case inQuotes && r == '\\':
+			escape = true
+
+		case r == '"':
+			inQuotes = !inQuotes
+
+		case !inQuotes && (r == ' ' || r == '\t'):
+			if cur.Len() > 0 {
+				args = append(args, cur.String())
+				cur.Reset()
+			}
+
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if cur.Len() > 0 {
+		args = append(args, cur.String())
+	}
+	return args
+}
 func (m *model) runCmd(line string) (quit bool) {
-	parts := strings.Fields(line)
+	parts := splitArgs(line) // <-- instead of strings.Fields(line)
+	if len(parts) == 0 {
+		return false
+	}
 	cmd := strings.ToLower(parts[0])
 
 	switch cmd {
 	case "/help":
-		m.appendBlock(sysStyle.Render("* Commands: /help /list /nick <name> /quit"))
+		m.appendBlock(sysStyle.Render("* Commands: /help /list /nick <name> /ascii <path|url> [--w=80] [--color] [--invert] [--charset=\"@%#*+=-:. \"] /quit"))
 		m.appendBlock(sysStyle.Render("* Tip: Use `|` between phrases to send multiple lines at once."))
+
 	case "/list":
 		m.appendBlock(sysStyle.Render("* users: " + strings.Join(listNames(), ", ")))
+
 	case "/nick":
 		if len(parts) < 2 {
 			m.appendBlock(sysStyle.Render("* usage: /nick <newname>"))
@@ -298,8 +343,95 @@ func (m *model) runCmd(line string) (quit bool) {
 		m.username = newName
 		m.nameStyled = nameStyleFor(newName).Render(newName)
 		bus <- fmt.Sprintf("* %s is now known as %s", old, newName)
+
+	case "/ascii":
+		if len(parts) < 2 {
+			m.appendBlock(sysStyle.Render("* usage: /ascii <path-or-url> [--w=80] [--color] [--invert] [--charset=\"@%#*+=-:. \"]"))
+			break
+		}
+
+		// Defaults
+		src := ""
+		width := 80
+		fit := false
+		colorize := false
+		invert := false
+		charset := "@%#*+=-:. "
+
+		// Parse args
+		for _, p := range parts[1:] {
+			if strings.HasPrefix(p, "--w=") {
+				var w int
+				if _, err := fmt.Sscanf(p, "--w=%d", &w); err == nil && w >= 8 && w <= 400 {
+					width = w
+				}
+				continue
+			}
+			if p == "--color" {
+				colorize = true
+				continue
+			}
+			if p == "--invert" {
+				invert = true
+				continue
+			}
+			if p == "--fit" {
+				fit = true
+				continue
+			}
+			if strings.HasPrefix(p, "--charset=") {
+				cs := strings.TrimPrefix(p, "--charset=")
+				cs = strings.Trim(cs, `"`)
+				if cs != "" {
+					charset = cs
+				}
+				continue
+			}
+			if !strings.HasPrefix(p, "--") && src == "" {
+				src = p
+			}
+		}
+		if src == "" {
+			m.appendBlock(sysStyle.Render("* usage: /ascii <path-or-url> [--w=80] [--color] [--invert] [--charset=...]"))
+			break
+		}
+
+		if (width == 80 || fit) && m.vp.Width > 0 {
+			width = m.vp.Width
+			if width > 200 {
+				width = 200 // keep sane for huge terminals
+			}
+		}
+
+		// Hard clamp to viewport minus a tiny margin (prevents wrap)
+		if m.vp.Width > 0 {
+			max := m.vp.Width - 2 // 1–2 cols for safety
+			if max < 8 {
+				max = 8
+			}
+			if width > max {
+				width = max
+			}
+		}
+		// Render without blocking UI
+		go func() {
+			bus <- sysStyle.Render("* rendering ascii…")
+			block, meta, err := asciiFromSource(src, width, colorize, invert, charset)
+			if err != nil {
+				bus <- sysStyle.Render("* ascii error: " + err.Error())
+				return
+			}
+			header := sysStyle.Render(
+				fmt.Sprintf("* %s  (%dx%d → %dx%d, color:%v, invert:%v)",
+					meta.Source, meta.OrigW, meta.OrigH, meta.OutW, meta.OutH, colorize, invert,
+				),
+			)
+			bus <- header + "\n" + block
+		}()
+
 	case "/quit", "/exit":
 		return true
+
 	default:
 		m.appendBlock(sysStyle.Render("* Unknown command. Try /help"))
 	}
