@@ -10,12 +10,13 @@ I programmed a minimalist tiny terminal chat you can run locally!
 
 ## ✿ Features (current & planned)
 
-- [x] Local TUI client  (｡•̀ᴗ-)✧  
+- [x] Local TUI client  (｡•̀ᴗ-)✧
+- [x] Added an ASCII to image converter!
+- [x] ~Yes, its gelbooru compatible you horny degenerate~
 - [ ] Dedicated server (no ngrok) for public rooms and latency hugs  
 - [ ] Pluggable mini-games (`/play`) for breaks between chats (o^▽^o)  
 - [ ] Instead of using `|` to split, use a /ascii command!!
-- [ ] Opt-in E2EE for private rooms (`/lock`)  
-- [ ] My friend wants a way to add porn... We'll see.. Horny aah degenerate
+- [ ] Opt-in E2EE for private rooms (`/lock`) 
 
 ---
 
